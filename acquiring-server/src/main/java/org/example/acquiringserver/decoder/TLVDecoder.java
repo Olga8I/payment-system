@@ -41,4 +41,15 @@ public class TLVDecoder {
 
         return fields;
     }
+
+    public int fromMiddleEndian(byte[] bytes) {
+        if (bytes.length != 4) {
+            throw new IllegalArgumentException("Middle-endian conversion requires 4 bytes");
+        }
+
+        return ((bytes[1] & 0xFF) << 24) |
+                ((bytes[0] & 0xFF) << 16) |
+                ((bytes[3] & 0xFF) << 8)  |
+                (bytes[2] & 0xFF);
+    }
 }

@@ -4,12 +4,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 
 /**
  * Тесты для TLV декодера
- * Проверяет корректность парсинга TLV формата
  */
 @SpringBootTest
 class TLVDecoderTest {
@@ -19,13 +21,13 @@ class TLVDecoderTest {
 
     @Test
     void testParseTLV_ValidData() {
-        // Подготовка тестовых TLV данных
+
         byte[] tlvData = {
-                0x10, 0x00, 0x10, // TAG=0x10, LENGTH=16
-                '4','2','4','2','*','*','*','*','*','*','*','*','4','2','4','2', // PAN
-                0x20, 0x00, 0x04, // TAG=0x20, LENGTH=4
-                0x00, 0x00, 0x27, 0x10, // Amount = 10000 (100.00)
-                0x30, 0x00, 0x24, // TAG=0x30, LENGTH=36
+                0x10, 0x00, 0x10,
+                '4','2','4','2','*','*','*','*','*','*','*','*','4','2','4','2',
+                0x20, 0x00, 0x04,
+                0x00, 0x00, 0x27, 0x10,
+                0x30, 0x00, 0x24,
                 't','e','s','t','-','u','u','i','d','-','1','2','3','4','5','6','7','8','9','0','1','2','3','4','5','6','7','8','9','0','1','2','3','4','5','6'
         };
 
@@ -33,26 +35,26 @@ class TLVDecoderTest {
 
         assertNotNull(result);
         assertEquals(3, result.size());
-        assertTrue(result.containsKey((byte) 0x10)); // PAN
-        assertTrue(result.containsKey((byte) 0x20)); // Amount
-        assertTrue(result.containsKey((byte) 0x30)); // Transaction ID
+        assertTrue(result.containsKey((byte) 0x10));
+        assertTrue(result.containsKey((byte) 0x20));
+        assertTrue(result.containsKey((byte) 0x30));
     }
 
     @Test
-    void testBytesToIntBigEndian_ValidConversion() {
-        byte[] amountBytes = {0x00, 0x00, 0x27, 0x10}; // 10000 в big-endian
+    void testFromMiddleEndian_ValidConversion() {
+        byte[] amountBytes = {0x00, 0x00, 0x27, 0x10};
 
-        int result = tlvDecoder.bytesToIntBigEndian(amountBytes);
+        int result = tlvDecoder.fromMiddleEndian(amountBytes);
 
         assertEquals(10000, result);
     }
 
     @Test
-    void testBytesToIntBigEndian_InvalidLength() {
-        byte[] invalidBytes = {0x01, 0x02, 0x03}; // Всего 3 байта вместо 4
+    void testFromMiddleEndian_InvalidLength() {
+        byte[] invalidBytes = {0x01, 0x02, 0x03};
 
         assertThrows(IllegalArgumentException.class, () -> {
-            tlvDecoder.bytesToIntBigEndian(invalidBytes);
+            tlvDecoder.fromMiddleEndian(invalidBytes);
         });
     }
 
@@ -62,6 +64,28 @@ class TLVDecoderTest {
 
         assertThrows(RuntimeException.class, () -> {
             tlvDecoder.parseTLV(emptyData);
+        });
+    }
+
+    @Test
+    void testParseTLV_IncompleteData() {
+
+        byte[] incompleteData = {0x10, 0x00};
+
+        assertThrows(RuntimeException.class, () -> {
+            tlvDecoder.parseTLV(incompleteData);
+        });
+    }
+
+    @Test
+    void testParseTLV_CorruptedLength() {
+        byte[] corruptedData = {
+                0x10, 0x00, 0x05,
+                '1', '2', '3'
+        };
+
+        assertThrows(RuntimeException.class, () -> {
+            tlvDecoder.parseTLV(corruptedData);
         });
     }
 }
