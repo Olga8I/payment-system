@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  acquiring-server:
+    build:
+      context: ./acquiring-server
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SERVER_PORT=8081
+      - HMAC_KEY=docker-secret-hmac-key-12345
+    volumes:
+      - ./acquiring-server/src/main/resources:/app/resources:ro
+      - ssl-keys:/app/ssl-keys
+    networks:
+      - payment-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  pos-terminal:
+    build:
+      context: ./pos-terminal
+      dockerfile: Dockerfile
+    depends_on:
+      acquiring-server:
+        condition: service_healthy
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SERVER_HOST=acquiring-server
+      - SERVER_PORT=8081
+      - HMAC_KEY=docker-secret-hmac-key-12345
+    volumes:
+      - ./pos-terminal/src/main/resources:/app/resources:ro
+      - packet-dumps:/app/packets
+    networks:
+      - payment-network
+    restart: on-failure
+
+volumes:
+  ssl-keys:
+  packet-dumps:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  payment-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
