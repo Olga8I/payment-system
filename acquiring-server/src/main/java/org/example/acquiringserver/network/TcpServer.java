@@ -26,9 +26,15 @@ public class TcpServer {
     private final ExecutorService executorService = Executors.newFixedThreadPool(10);
     private volatile boolean running = true;
 
+    private static final int ENCRYPTED_SESSION_KEY_SIZE = 256;
+    private static final int IV_SIZE = 12;
+    private static final int HMAC_SIZE = 32;
+    private static final int HEADER_SIZE = 4;
+
     public void start() throws IOException {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            log.info(" Server started on port {}", port);
+            serverSocket.setReuseAddress(true);
+            log.info("Server started on port {}", port);
 
             while (running) {
                 Socket clientSocket = serverSocket.accept();
@@ -44,14 +50,34 @@ public class TcpServer {
         try (var input = socket.getInputStream();
              var output = socket.getOutputStream()) {
 
-            byte[] buffer = new byte[4096];
-            int bytesRead = input.read(buffer);
+            byte[] header = new byte[4];
+            int headerBytesRead = input.read(header);
 
-            if (bytesRead > 0) {
-                log.debug("📨 Received {} bytes from client", bytesRead);
-                byte[] response = packetProcessor.processPacket(buffer);
+            if (headerBytesRead != 4) {
+                log.error("Invalid header size: {}", headerBytesRead);
+                return;
+            }
+
+            int totalPacketLength = ((header[2] & 0xFF) << 8) | (header[3] & 0xFF);
+
+            int remainingLength = totalPacketLength - 4;
+            byte[] remainingData = new byte[remainingLength];
+            int bytesRead = input.read(remainingData);
+
+            if (bytesRead != remainingLength) {
+                log.error("Incomplete packet. Expected: {}, Got: {}", remainingLength, bytesRead);
+                return;
+            }
+
+            byte[] fullPacket = new byte[totalPacketLength];
+            System.arraycopy(header, 0, fullPacket, 0, 4);
+            System.arraycopy(remainingData, 0, fullPacket, 4, remainingLength);
+
+            log.debug("Received {} bytes from client", totalPacketLength);
+            byte[] response = packetProcessor.processPacket(fullPacket);
+
+            if (response != null) {
                 output.write(response);
-                log.debug("Sent {} bytes response", response.length);
             }
 
         } catch (IOException e) {
@@ -64,5 +90,4 @@ public class TcpServer {
             }
         }
     }
-
 }

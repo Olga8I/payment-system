@@ -37,7 +37,7 @@ public class PacketProcessor {
             // 1. Эмуляция таймаута (5%) - сервер не отвечает
             if (failureEmulator.shouldTimeout()) {
                 log.warn("Emulating timeout (5% chance) - no response sent");
-                return null; // Это приведет к закрытию соединения без ответа
+                return null;
             }
 
             ByteBuffer buffer = ByteBuffer.wrap(receivedData);
@@ -45,19 +45,22 @@ public class PacketProcessor {
             // 2. Парсинг и валидация заголовка
             byte version = buffer.get();
             byte messageType = buffer.get();
-            int totalPacketLength = Short.toUnsignedInt(buffer.getShort()); // Важно: длина ВСЕГО пакета
+            int totalPacketLength = Short.toUnsignedInt(buffer.getShort());
+
+            if (totalPacketLength != receivedData.length) {
+                log.warn("Packet length mismatch. Expected: {}, Actual: {}",
+                        totalPacketLength, receivedData.length);
+                return createErrorResponse(0x04, "LENGTH_MISMATCH");
+            }
 
             if (version != 0x01) {
                 log.warn("Unsupported protocol version: {}", version);
                 return createErrorResponse(0x02, "UNSUPPORTED_VERSION");
             }
+
             if (messageType != 0x01) {
                 log.warn("Unsupported message type: {}", messageType);
                 return createErrorResponse(0x03, "UNSUPPORTED_TYPE");
-            }
-            if (totalPacketLength != receivedData.length) {
-                log.warn("Packet length mismatch. Expected: {}, Actual: {}", totalPacketLength, receivedData.length);
-                return createErrorResponse(0x04, "LENGTH_MISMATCH");
             }
 
             // 3. Эмуляция недоступности сервиса (2%)
@@ -133,7 +136,7 @@ public class PacketProcessor {
 
         // PAN
         transaction.setPan(new String(fields.get((byte) 0x10)));
-        // Amount (BIG-ENDIAN исправление!)
+        // Amount (BIG-ENDIAN)
         transaction.setAmount(bytesToIntBigEndian(fields.get((byte) 0x20)));
         // Transaction ID
         transaction.setTransactionId(new String(fields.get((byte) 0x30)));

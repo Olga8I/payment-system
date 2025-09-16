@@ -31,6 +31,9 @@ import java.time.Instant;
 public class TransactionService {
 
     private static final int SOCKET_TIMEOUT_MS = 3000;
+    private static final int ENCRYPTED_SESSION_KEY_SIZE = 256;
+    private static final int IV_SIZE = 12;
+    private static final int HMAC_SIZE = 32;
 
     private final CryptoUtils cryptoUtils;
     private final TLVEncoder tlvEncoder;
@@ -45,8 +48,13 @@ public class TransactionService {
     private int serverPort;
 
     /**
-     * Отправка транзакции на сервер с поддержкой retry при таймаутах
+     * Генерация и отправка случайной транзакции
      */
+    public void sendRandomTransaction() throws IOException {
+        Transaction transaction = transactionGenerator.generateRandomTransaction();
+        sendTransaction(transaction);
+    }
+
     @Retryable(maxAttempts = 2, backoff = @Backoff(delay = 3000), include = SocketTimeoutException.class)
     public void sendTransaction(Transaction transaction) throws IOException {
         keyRotationService.incrementTransactionCount();
@@ -55,44 +63,55 @@ public class TransactionService {
         byte[] packet = createPacket(transaction);
         log.debug("Packet hexdump:\n{}", HexDumpUtil.toHexDump(packet));
 
+        log.debug("Packet structure: header=4, sessionKey={}, iv={}, hmac={}, data={}",
+                ENCRYPTED_SESSION_KEY_SIZE, IV_SIZE, HMAC_SIZE,
+                (packet.length - 4 - ENCRYPTED_SESSION_KEY_SIZE - IV_SIZE - HMAC_SIZE));
+
         sendPacket(packet);
     }
 
-    public void sendRandomTransaction() throws IOException {
-        Transaction transaction = transactionGenerator.generateRandomTransaction();
-        sendTransaction(transaction);
-    }
-
-    /**
-     * Создание бинарного пакета для отправки на сервер
-     */
     private byte[] createPacket(Transaction transaction) {
         try {
             byte[] sessionKey = cryptoUtils.generateSessionKey();
             byte[] encryptedSessionKey = cryptoUtils.encryptWithRSA(sessionKey);
 
+            if (encryptedSessionKey.length != ENCRYPTED_SESSION_KEY_SIZE) {
+                throw new RuntimeException("Encrypted session key has wrong size: " + encryptedSessionKey.length);
+            }
+
             byte[] tlvData = tlvEncoder.encodeTransaction(transaction);
 
-            byte[] iv = new byte[12];
+            byte[] iv = new byte[IV_SIZE];
             secureRandom.nextBytes(iv);
 
             byte[] encryptedData = cryptoUtils.encryptWithAES(tlvData, sessionKey, iv);
             byte[] hmac = cryptoUtils.calculateHmac(encryptedData);
 
-            ByteArrayOutputStream packet = new ByteArrayOutputStream();
+            if (hmac.length != HMAC_SIZE) {
+                throw new RuntimeException("HMAC has wrong size: " + hmac.length);
+            }
 
             int totalLength = 4 + encryptedSessionKey.length + iv.length + hmac.length + encryptedData.length;
-            packet.write(0x01);
-            packet.write(0x01);
-            packet.write((totalLength >> 8) & 0xFF);
-            packet.write(totalLength & 0xFF);
+
+            ByteArrayOutputStream packet = new ByteArrayOutputStream(totalLength);
+
+            packet.write(0x01); // версия
+            packet.write(0x01); // тип сообщения
+            packet.write((totalLength >> 8) & 0xFF); // старший байт длины
+            packet.write(totalLength & 0xFF); // младший байт длины
 
             packet.write(encryptedSessionKey);
             packet.write(iv);
             packet.write(hmac);
             packet.write(encryptedData);
 
-            return packet.toByteArray();
+            byte[] result = packet.toByteArray();
+
+            if (result.length != totalLength) {
+                throw new RuntimeException("Packet length mismatch. Expected: " + totalLength + ", Actual: " + result.length);
+            }
+
+            return result;
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to create packet", e);
